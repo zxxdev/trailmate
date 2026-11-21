@@ -41,15 +41,62 @@ function Guide.list(guides, who)
   return out
 end
 
+-- How many of a guide's steps are on a map (counted once per guide).
+local zoneCounts = setmetatable({}, { __mode = "k" })
+local function stepsOn(g, mapID)
+  local counts = zoneCounts[g]
+  if not counts then
+    counts = {}
+    for _, s in ipairs(g.steps or {}) do
+      if s.m then
+        counts[s.m] = (counts[s.m] or 0) + 1
+      end
+    end
+    zoneCounts[g] = counts
+  end
+  return counts[mapID] or 0
+end
+
+-- A guide counts as one for a zone when it has a real part there.
+Guide.ZONE_STEPS = 5
+-- A guide for the zone may be up to this many levels below the player.
+Guide.ZONE_BELOW = 3
+
+--- True if the guide has a real part on this map.
+function Guide.covers(g, mapID)
+  return mapID ~= nil and stepsOn(g, mapID) >= Guide.ZONE_STEPS
+end
+
+--- The unfinished guide with the biggest part on this map among those that
+--- suit the level (it starts at most one level above it and ends at most
+--- ZONE_BELOW below it), or nil. A guide that only passes through the zone
+--- (a few steps on the way out) loses to the zone's own guide.
+function Guide.forZone(list, level, mapID, finished)
+  local best, most = nil, 0
+  for _, g in ipairs(list) do
+    if g.min <= level + 1 and g.max >= level - Guide.ZONE_BELOW and Guide.covers(g, mapID)
+      and not (finished and finished(g)) and stepsOn(g, mapID) > most then
+      best, most = g, stepsOn(g, mapID)
+    end
+  end
+  return best
+end
+
 --- The guide to follow: the one chosen by name if it still exists; else
---- the first guide for the level (from one level below its end) that is not
---- finished; else the last one starting at or below the level.
---- finished(guide) (optional) says whether its quests are all handed in.
-function Guide.pick(list, level, chosen, finished)
+--- the first unfinished guide with a part where the player is (mapID,
+--- optional); else the first guide for the level (from one level below its
+--- end) that is not finished; else the last one starting at or below the
+--- level. finished(guide) (optional) says whether its quests are all
+--- handed in.
+function Guide.pick(list, level, chosen, finished, mapID)
   for _, g in ipairs(list) do
     if chosen and g.name == chosen then
       return g
     end
+  end
+  local here = Guide.forZone(list, level, mapID, finished)
+  if here then
+    return here
   end
   for _, g in ipairs(list) do
     if g.min <= level and g.max >= level - 1 and not (finished and finished(g)) then
@@ -146,6 +193,29 @@ function Guide.unavailable(guide, who, needs, done, inLog)
   return gone
 end
 
+-- Words of a note that speaks about the guide itself, not the game: a link,
+-- or asking for support. Lower case.
+local AUTHOR_WORDS = {
+  "http", "www%.", "%.com", "%.gg", "%.tv", "youtube", "twitch", "patreon", "paypal", "ko%-fi",
+  "curseforge", "discord", "my work", "my guide", "written by",
+}
+
+--- True for a guide note that is the author's (a link, a request for
+--- support), not something to do in the game: it is left out of the plan.
+--- The guides' authors are credited in the README.
+function Guide.isAuthorNote(s)
+  if s.t ~= "note" or type(s.text) ~= "string" then
+    return false
+  end
+  local text = s.text:lower()
+  for _, w in ipairs(AUTHOR_WORDS) do
+    if text:find(w) then
+      return true
+    end
+  end
+  return false
+end
+
 --- A TrailMate plan from a guide. ctx = { who, L, title(questID), place(step),
 --- needs, done(id), inLog(id) }: title gives the game's (localized) quest
 --- name, falling back to the guide's; place gives where the player saw that
@@ -164,7 +234,7 @@ function Guide.toPlan(guide, ctx)
   end
   local gone = ctx.needs and Guide.unavailable(guide, who, ctx.needs, ctx.done or never, ctx.inLog or never) or {}
   for i, s in ipairs(guide.steps) do
-    if fits(s.only, who) and not (s.q and gone[s.q]) then
+    if fits(s.only, who) and not (s.q and gone[s.q]) and not Guide.isAuthorNote(s) then
       local step = { id = "g" .. i }
       local name = s.q and ((ctx.title and ctx.title(s.q)) or s.name or L["Quest %d"]:format(s.q))
       if s.t == "accept" then

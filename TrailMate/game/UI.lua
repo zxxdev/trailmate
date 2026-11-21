@@ -8,7 +8,7 @@ local _, ns = ...
 local UI = {}
 ns.UI = UI
 
-local WIDTH, HEIGHT = 330, 164
+local WIDTH, HEIGHT = 330, 172
 
 local function text(parent, template, x, y, width)
   local fs = parent:CreateFontString(nil, "OVERLAY", template)
@@ -91,8 +91,9 @@ function UI.create(saved)
   ns.Theme.movable(f, saved)
   ns.Theme.panel(f)
   local _, title = ns.Theme.header(f, "TrailMate", 28)
-  title:SetWidth(WIDTH - 110)
+  title:SetWidth(WIDTH - 150)
   title:SetJustifyH("LEFT")
+  title:SetMaxLines(1)
   f.title = title
   f.counter = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   f.counter:SetPoint("TOPRIGHT", -14, -15)
@@ -101,18 +102,28 @@ function UI.create(saved)
   f.icon:SetSize(18, 18)
   f.icon:SetPoint("TOPLEFT", 14, -40)
   f.step = text(f, "GameFontHighlight", 36, -42)
+  f.step:SetMaxLines(2)
+  -- Under the step text, so a long quest name never runs over it.
   f.why = text(f, "GameFontNormalSmall", 36, -62)
+  f.why:ClearAllPoints()
+  f.why:SetPoint("TOPLEFT", f.step, "BOTTOMLEFT", 0, -6)
+  f.why:SetMaxLines(1)
   f.why:SetTextColor(ns.Theme.rgb(ns.Theme.COLORS.warning))
-  -- The next steps: click one to do it now instead.
+  -- The next steps, under the "why" line: click one to do it now instead.
   f.rows = {}
   for i = 1, NEXT_ROWS do
     local b = CreateFrame("Button", nil, f)
     b:SetSize(WIDTH - 28, 14)
-    b:SetPoint("TOPLEFT", 14, -82 - (i - 1) * 14)
+    if i == 1 then
+      b:SetPoint("TOPLEFT", f.why, "BOTTOMLEFT", -22, -6)
+    else
+      b:SetPoint("TOPLEFT", f.rows[i - 1], "BOTTOMLEFT", 0, 0)
+    end
     b.label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     b.label:SetPoint("LEFT", 2, 0)
     b.label:SetWidth(WIDTH - 32)
     b.label:SetJustifyH("LEFT")
+    b.label:SetMaxLines(1)
     b.label:SetTextColor(ns.Theme.rgb(ns.Theme.COLORS.muted))
     b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     b:SetScript("OnClick", function(self)
@@ -123,8 +134,17 @@ function UI.create(saved)
     f.rows[i] = b
   end
 
+  -- How the target is marked on the map: kept for the self-test, not shown
+  -- (its place is the Undo button's).
   f.arrow = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.arrow:SetPoint("BOTTOMLEFT", 16, 14)
+  f.arrow:Hide()
+  -- A Done or Skip by mistake is one click away from being undone.
+  f.undo = ns.Theme.button(f, "", 72, function()
+    run("undo")
+  end)
+  f.undo:SetSize(72, 20)
+  f.undo:SetPoint("BOTTOMLEFT", 14, 10)
   f.chips = {}
   for i = 1, CHIPS do
     f.chips[i] = chip(f, i)
@@ -139,6 +159,15 @@ function UI.create(saved)
   end)
   f.done:SetSize(64, 20)
   f.done:SetPoint("RIGHT", f.skip, "LEFT", -4, 0)
+  ns.Theme.primary(f.done)
+  -- While the arrow follows a quest the player marked: the way back.
+  f.back = ns.Theme.button(f, "", 132, function()
+    run("plan")
+  end)
+  f.back:SetSize(132, 20)
+  ns.Theme.primary(f.back)
+  f.back:SetPoint("BOTTOMRIGHT", -12, 10)
+  f.back:Hide()
 
   f:SetScript("OnMouseUp", function(_, button)
     if button == "RightButton" then
@@ -180,11 +209,19 @@ function UI.setShown(shown)
   UI.frame:SetShown(shown)
 end
 
+local function goldCounter(f)
+  local g = ns.Theme.GOLD
+  f.counter:SetTextColor(g[1], g[2], g[3])
+end
+
 local function setButtons(f, L, visible)
   f.done:SetText(L["Done"])
   f.skip:SetText(L["Skip"])
+  f.undo:SetText(L["Undo"])
   f.done:SetShown(visible)
   f.skip:SetShown(visible)
+  f.undo:SetShown(visible)
+  f.back:Hide()
 end
 
 local function setStepLook(f, kind)
@@ -207,6 +244,7 @@ function UI.renderTravel(lines, L)
   end
   f.title:SetText(L["Travel"])
   f.counter:SetText(L["Travel"])
+  goldCounter(f)
   setStepLook(f, "goto")
   f.step:SetText(lines[2] and (lines[2]:gsub("^%- ", "")) or (lines[1] or ""))
   f.why:SetText(lines[1] or "")
@@ -220,13 +258,43 @@ function UI.renderTravel(lines, L)
   setButtons(f, L, false)
 end
 
+--- The arrow follows a quest the player marked. marked: { label, kind };
+--- waiting: the guide's current step text (or nil); guide: the plan is a
+--- guide (else a route). The guide's Done / Skip give way to the way back.
+function UI.renderMarked(marked, waiting, guide, L)
+  local f = UI.frame
+  if not f then
+    return
+  end
+  f.title:SetText(L["Your marked quest"])
+  f.counter:SetText(guide and L["Guide paused"] or L["Route paused"])
+  f.counter:SetTextColor(ns.Theme.rgb(ns.Theme.COLORS.muted))
+  setStepLook(f, marked.kind or "complete")
+  f.step:SetText(marked.label or "")
+  f.why:SetText(waiting and L["Next in the guide - %s"]:format(waiting) or "")
+  f.why:SetTextColor(ns.Theme.rgb(ns.Theme.COLORS.muted))
+  setNext(f, {})
+  f.arrow:SetText("")
+  setButtons(f, L, false)
+  f.back:SetText(guide and L["Back to the guide"] or L["Back to the route"])
+  f.back:Show()
+end
+
 --- Draws the plan state. Any argument may be nil.
 function UI.render(plan, current, statuses, L, arrowMethod)
   local f = UI.frame
   if not f then
     return
   end
-  f.title:SetText(plan and plan.title or "TrailMate")
+  -- Say what is being followed: a guide, or TrailMate's own route.
+  local title = plan and plan.title or "TrailMate"
+  if plan and ns.Guide.isGuide(plan) then
+    title = L["Guide: %s"]:format(title)
+  elseif plan then
+    title = L["Route: %s"]:format(title)
+  end
+  f.title:SetText(title)
+  goldCounter(f)
   f.why:SetTextColor(ns.Theme.rgb(ns.Theme.COLORS.warning))
   if not plan or not current then
     local empty = L["No plan loaded. Type /tm questlog to build one from your quest log."]
@@ -240,7 +308,15 @@ function UI.render(plan, current, statuses, L, arrowMethod)
     return
   end
   local step = plan.steps[current]
-  f.counter:SetText(L["Step %d of %d"]:format(current, #plan.steps))
+  -- How far along: steps done or skipped, not the place of the current one
+  -- (a step chosen from the list would make that look further than it is).
+  local passed = 0
+  for i = 1, #plan.steps do
+    if statuses and (statuses[i] == "done" or statuses[i] == "skipped") then
+      passed = passed + 1
+    end
+  end
+  f.counter:SetText(L["%d of %d done"]:format(passed, #plan.steps))
   setStepLook(f, step.type)
   f.step:SetText(step.text)
   f.why:SetText(step.why or "")

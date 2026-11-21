@@ -30,7 +30,7 @@ Un entrenador de subida de nivel para **World of Warcraft: Forever** (versión 1
 | Planificador de viajes | La forma más rápida de llegar a una zona: compara ir andando, los vuelos que tienes aprendidos, la piedra de hogar si está lista, y barcos o zepelines entre continentes (por ejemplo, de Orgrimmar a Grom'gol). |
 | Aprende mientras juegas | Su propio atlas, compartido por tus personajes: quién da y quién recoge cada misión, instructores, vendedores, posaderos y maestros de vuelo, según lo que te ha enseñado el juego. |
 | Chat con el compañero | `/tm chat` abre una ventana pequeña para hablar con tu compañero de IA sobre tu personaje. Tu pregunta va con tu estado actual (nivel, zona, plan, diario, siguiente talento), nunca con nombres. Necesita el programa puente en tu PC (mira más abajo). El compañero no tiene herramientas: solo contesta. |
-| Icono del compañero | El icono es una piedra gastada con una huella que brilla. El brillo sigue a tu compañero de IA (`/tm compañero claude` o `chatgpt`). |
+| Icono del compañero | El icono es una medalla con aro dorado, una huella blanca y un sendero. El sendero toma el color de tu compañero de IA (`/tm compañero claude` o `chatgpt`). |
 | Autotest | `/tm test` comprueba todo lo que se puede comprobar sin que hagas nada y escribe líneas PASS o FAIL en la pestaña Registro, listas para copiar. No cambia nada. |
 | Panel y registro | `/tm` o el botón del minimapa abre un panel con las pestañas Ruta, Zonas, Instructor, Bolsas y Registro. Todo lo que dice TrailMate se guarda en el registro, que puedes seleccionar y copiar. |
 
@@ -88,6 +88,8 @@ El chat usa las teclas `Ctrl+Alt+Mayús+F1` a `F8` mientras sale un mensaje, y l
 | `/tm reserva <oro>` · `/tm reserve` | Oro que el consejo del instructor nunca gasta |
 | `/tm auto on\|off` | Rehace el plan solo cuando se acaba |
 | `/tm mostrar` / `/tm ocultar` | Muestra u oculta la ventana |
+| `/tm minimapa` | Muestra u oculta el botón del minimapa |
+| `/tm opciones` | La página de TrailMate en Esc > Opciones > AddOns |
 | `/tm borrar` · `/tm clear` | Quita el plan |
 | `/tm test` | Autotest, escrito en el registro |
 | `/tm diag` | Qué ofrece este cliente, para avisar de fallos (sin datos personales) |
@@ -133,7 +135,7 @@ Las imágenes se dibujan con código, así que los tests las comprueban y se pue
 
 ```bash
 lua tools/make_arrow.lua   # media/Arrow.tga: la flecha, 128 ángulos
-lua tools/make_icon.lua    # media/Icon*.tga: la piedra con la huella, una por compañero
+lua tools/make_icon.lua    # media/Icon*.tga: la medalla con la huella, una por compañero
 lua tools/make_pin.lua     # media/Pin.tga: el alfiler del mapa
 ```
 

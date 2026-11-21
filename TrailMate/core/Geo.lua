@@ -12,6 +12,48 @@ ns.Geo = Geo
 
 local TWO_PI = 2 * math.pi
 
+-- Minimap shapes (GetMinimapShape): which quarters are round, in the order
+-- bottom-right, bottom-left, top-right, top-left. A missing shape is round.
+local SHAPES = {
+  ROUND = { true, true, true, true },
+  SQUARE = { false, false, false, false },
+  ["CORNER-TOPLEFT"] = { false, false, false, true },
+  ["CORNER-TOPRIGHT"] = { false, false, true, false },
+  ["CORNER-BOTTOMLEFT"] = { false, true, false, false },
+  ["CORNER-BOTTOMRIGHT"] = { true, false, false, false },
+  ["SIDE-LEFT"] = { false, true, false, true },
+  ["SIDE-RIGHT"] = { true, false, true, false },
+  ["SIDE-TOP"] = { false, false, true, true },
+  ["SIDE-BOTTOM"] = { true, true, false, false },
+  ["TRICORNER-TOPLEFT"] = { false, true, true, true },
+  ["TRICORNER-TOPRIGHT"] = { true, false, true, true },
+  ["TRICORNER-BOTTOMLEFT"] = { true, true, false, true },
+  ["TRICORNER-BOTTOMRIGHT"] = { true, true, true, false },
+}
+
+--- Where a button sits on the minimap's edge, as x, y from its centre:
+--- angle in degrees (0 is east, counter-clockwise), halfW and halfH half the
+--- minimap's size plus how far out the button goes. On a round quarter it
+--- follows the circle; on a square one it follows the square's side.
+function Geo.edgeOffset(angle, halfW, halfH, shape)
+  local rad = math.rad(angle)
+  local x, y = math.cos(rad), math.sin(rad)
+  local q = 1
+  if x < 0 then
+    q = q + 1
+  end
+  if y > 0 then
+    q = q + 2
+  end
+  local round = (SHAPES[shape or "ROUND"] or SHAPES.ROUND)[q]
+  if round then
+    return x * halfW, y * halfH
+  end
+  -- Out along the diagonal, then held to the square's sides.
+  local dw, dh = math.sqrt(2 * halfW * halfW) - 10, math.sqrt(2 * halfH * halfH) - 10
+  return math.max(-halfW, math.min(x * dw, halfW)), math.max(-halfH, math.min(y * dh, halfH))
+end
+
 --- Distance in yards between two points of the same map, given the map size
 --- in yards. Returns nil when the size is unknown.
 function Geo.distance(px, py, tx, ty, width, height)

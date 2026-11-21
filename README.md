@@ -30,7 +30,7 @@ A leveling coach for **World of Warcraft: Forever** (game version 1.60, interfac
 | Travel planner | The quickest way to a zone, comparing walking, flights you have learned, your hearthstone when it is ready, and ships or zeppelins across continents (Orgrimmar to Grom'gol, for example). |
 | Learns as you play | Its own atlas, shared by your characters: quest givers, turn-ins, trainers, vendors, innkeepers and flight masters, from what the game showed you. |
 | Companion chat | `/tm chat` opens a small window to talk to your AI companion about your character. Your question goes with your current state (level, zone, plan, quest log, next talent), never names. It needs the bridge program running on your PC (see below). The companion has no tools: it only answers. |
-| Companion icon | The icon is a worn stone with a glowing paw. Its glow follows your AI companion (`/tm companion claude` or `chatgpt`). |
+| Companion icon | The icon is a round badge with a gold ring, a white paw print and a winding trail. The trail takes the colour of your AI companion (`/tm companion claude` or `chatgpt`). |
 | Self-test | `/tm test` checks everything that can be checked without you doing anything and writes PASS or FAIL lines to the Log tab, ready to copy. It changes nothing. |
 | Panel and log | `/tm` or the minimap button opens a panel with Route, Zones, Trainer, Bags and Log tabs. Everything TrailMate says is kept in the log, which you can select and copy. |
 
@@ -88,6 +88,8 @@ The chat uses the keys `Ctrl+Alt+Shift+F1` to `F8` while a message goes out, and
 | `/tm reserve <gold>` · `/tm reserva <oro>` | Gold the trainer advice never spends |
 | `/tm auto on\|off` | Rebuild the plan by itself when it ends |
 | `/tm show` / `/tm hide` | Show or hide the window |
+| `/tm minimap` | Show or hide the minimap button |
+| `/tm options` | TrailMate's page in Esc > Options > AddOns |
 | `/tm clear` · `/tm borrar` | Remove the plan |
 | `/tm test` | Self-test, written to the log |
 | `/tm diag` | What this client exposes, for bug reports (no personal data) |
@@ -133,7 +135,7 @@ The pictures are drawn by code, so they can be checked by tests and rebuilt at a
 
 ```bash
 lua tools/make_arrow.lua   # media/Arrow.tga: the arrow, 128 angles
-lua tools/make_icon.lua    # media/Icon*.tga: the stone with the paw, one per companion
+lua tools/make_icon.lua    # media/Icon*.tga: the badge with the paw, one per companion
 lua tools/make_pin.lua     # media/Pin.tga: the map pin
 ```
 

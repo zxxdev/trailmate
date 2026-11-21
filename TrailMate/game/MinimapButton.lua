@@ -7,12 +7,22 @@ local _, ns = ...
 local MinimapButton = {}
 ns.MinimapButton = MinimapButton
 
-local RADIUS = 80
+-- How far past the minimap's edge the button's centre goes, like other
+-- addons' buttons: it sits on the ring, half in and half out.
+local OUT = 5
+-- The classic minimap's size, for when the game has not laid it out yet.
+local FALLBACK_SIZE = 140
+
+local function size(get)
+  local v = get and get(Minimap)
+  return (type(v) == "number" and v > 0) and v or FALLBACK_SIZE
+end
 
 local function place(b, angle)
-  local rad = math.rad(angle)
+  local shape = GetMinimapShape and GetMinimapShape() or "ROUND"
+  local x, y = ns.Geo.edgeOffset(angle, size(Minimap.GetWidth) / 2 + OUT, size(Minimap.GetHeight) / 2 + OUT, shape)
   b:ClearAllPoints()
-  b:SetPoint("CENTER", Minimap, "CENTER", math.cos(rad) * RADIUS, math.sin(rad) * RADIUS)
+  b:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
 
 function MinimapButton.create(saved, L, onLeft, onRight)
@@ -26,19 +36,25 @@ function MinimapButton.create(saved, L, onLeft, onRight)
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:RegisterForDrag("LeftButton")
   b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-
-  local icon = b:CreateTexture(nil, "BACKGROUND")
+  -- Like every addon's minimap button: the icon's face (no ring of its own)
+  -- inside the game's gold ring.
+  local icon = b:CreateTexture(nil, "ARTWORK")
   icon:SetSize(20, 20)
-  icon:SetPoint("TOPLEFT", 6, -5)
-  ns.Theme.useIcon(icon)
-  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  icon:SetPoint("CENTER", b, "CENTER", 0, 0)
+  ns.Theme.useIcon(icon, true)
   local border = b:CreateTexture(nil, "OVERLAY")
-  border:SetSize(53, 53)
+  border:SetSize(50, 50)
   border:SetPoint("TOPLEFT")
   border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
   saved.angle = saved.angle or 200
   place(b, saved.angle)
+  -- The minimap can change size (or get it late): stay on its edge.
+  if Minimap.HookScript then
+    pcall(Minimap.HookScript, Minimap, "OnSizeChanged", function()
+      place(b, saved.angle)
+    end)
+  end
 
   b:SetScript("OnDragStart", function(self)
     self:SetScript("OnUpdate", function()

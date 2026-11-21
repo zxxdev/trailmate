@@ -67,6 +67,40 @@ describe("Guide", function()
     assert.equals("36-39 Desolace", Guide.pick(list, 34, "36-39 Desolace").name)
   end)
 
+  it("picks the guide for the zone the player is in (the user's case: level 36 in Stranglethorn)", function()
+    local list = Guide.list(ns.GUIDES, hunter)
+    -- By level alone, 36 goes on to the next guide in the order.
+    assert.equals("34-35 Dalaran City", Guide.pick(list, 36).name)
+    -- In Stranglethorn, the Stranglethorn guide (up to 3 levels below) wins.
+    assert.equals("33-34 Stranglethorn Vale", Guide.pick(list, 36, nil, nil, 1434).name)
+    -- Once it is finished, the next one with a part there.
+    local done = function(g) return g.name == "33-34 Stranglethorn Vale" end
+    local nextHere = Guide.pick(list, 36, nil, done, 1434)
+    assert.is_true(Guide.covers(nextHere, 1434))
+    assert.are_not.equal("33-34 Stranglethorn Vale", nextHere.name)
+    -- A zone with no guide for the level: by level, as before.
+    assert.is_nil(Guide.forZone(list, 36, 999999))
+    assert.equals("34-35 Dalaran City", Guide.pick(list, 36, nil, nil, 999999).name)
+    -- A chosen guide still wins.
+    assert.equals("36-39 Desolace", Guide.pick(list, 36, "36-39 Desolace", nil, 1434).name)
+  end)
+
+  it("leaves out the authors' notes: thanks, links and donations (the user's case)", function()
+    assert.is_true(Guide.isAuthorNote({ t = "note",
+      text = "This guide was written by TUGs and is totally free, but if you want to support my work use: https://x" }))
+    assert.is_true(Guide.isAuthorNote({ t = "note", text = "Thanks for using my guide. There is a Paypal-Link." }))
+    assert.is_false(Guide.isAuthorNote({ t = "note", text = "Fly to Booty Bay" }))
+    assert.is_false(Guide.isAuthorNote({ t = "accept", q = 7820, name = "A Donation of Wool" }))
+    -- A note about the game that speaks of donating is kept.
+    assert.is_false(Guide.isAuthorNote({ t = "note", text = "Donate the wool at the tent, then fly back" }))
+    for _, g in ipairs(Guide.list(ns.GUIDES, hunter)) do
+      for _, s in ipairs(Guide.toPlan(g, { who = hunter, L = L }).steps) do
+        assert.is_nil(s.text:lower():find("http"), s.text)
+        assert.is_nil(s.text:lower():find("paypal"), s.text)
+      end
+    end
+  end)
+
   it("has a real place for the Grom'gol quests and a valid plan for every guide", function()
     local stv = Guide.pick(Guide.list(ns.GUIDES, hunter), 34)
     local plan = Guide.toPlan(stv, { who = hunter, L = L })

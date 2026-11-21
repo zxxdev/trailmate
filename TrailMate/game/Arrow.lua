@@ -62,6 +62,25 @@ function Arrow.create(saved, L)
   return f
 end
 
+-- Places to bring the arrow back to, if it was dragged where it is lost.
+Arrow.PLACES = {
+  top = { "TOP", 0, -16 }, -- right at the top of the screen, in the middle
+  center = { "CENTER", 0, 60 }, -- the middle of the screen, a little above the character
+}
+
+--- Moves the arrow to "top" or "center" and remembers it. False if unknown.
+function Arrow.place(where)
+  local p, f = Arrow.PLACES[where], Arrow.frame
+  if not (p and f) then
+    return false
+  end
+  f:ClearAllPoints()
+  f:SetPoint(p[1], UIParent, p[1], p[2], p[3])
+  local saved = Arrow.saved
+  saved.point, saved.relPoint, saved.x, saved.y = p[1], p[1], p[2], p[3]
+  return true
+end
+
 --- Points the arrow at target ({ mapID, x, y }) with a label, or hides it.
 --- note: what to say when there is no place to point at (nil: "not known").
 function Arrow.setTarget(target, label, note)

@@ -12,6 +12,35 @@ describe("Geo", function()
     assert.is_true(math.abs(expected - actual) < 1e-9, ("expected %s, got %s"):format(expected, actual))
   end
 
+  it("puts the minimap button on the edge of a round minimap, whatever its size", function()
+    -- A bigger minimap than the classic one (the user's case: it sat inside).
+    local x, y = Geo.edgeOffset(0, 105, 105)
+    near(105, x)
+    near(0, y)
+    x, y = Geo.edgeOffset(90, 75, 75, "ROUND")
+    near(0, x)
+    near(75, y)
+    x, y = Geo.edgeOffset(225, 105, 105, "UNKNOWN") -- an unknown shape is round
+    near(-105 * math.sqrt(2) / 2, x)
+    near(-105 * math.sqrt(2) / 2, y)
+  end)
+
+  it("follows the sides of a square minimap into its corners", function()
+    local x, y = Geo.edgeOffset(45, 75, 75, "SQUARE")
+    local d = (math.sqrt(2 * 75 * 75) - 10) * math.sqrt(2) / 2
+    near(d, x)
+    near(d, y)
+    x = Geo.edgeOffset(10, 75, 75, "SQUARE")
+    near(75, x) -- held to the right side
+    -- A minimap in the top-left corner of the screen is round only in its
+    -- top-left quarter (the names other addons use for the shapes).
+    x = Geo.edgeOffset(135, 75, 75, "CORNER-TOPLEFT")
+    near(-75 * math.sqrt(2) / 2, x)
+    x, y = Geo.edgeOffset(-45, 75, 75, "CORNER-TOPLEFT")
+    near(d, x)
+    near(-d, y)
+  end)
+
   it("measures yards with the map size", function()
     near(500, Geo.distance(0.5, 0.5, 0.5, 0.0, 2000, 1000))
     near(1000, Geo.distance(0.0, 0.5, 0.5, 0.5, 2000, 1000))

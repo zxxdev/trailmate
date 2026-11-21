@@ -839,6 +839,19 @@ function Api.questTitle(questID)
   return nil
 end
 
+--- The quest the game follows now (the player clicked it in the tracker or
+--- the quest log, or an addon chose it), or nil.
+function Api.superTrackedQuest()
+  local id = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and safe(C_SuperTrack.GetSuperTrackedQuestID)
+  return type(id) == "number" and id > 0 and id or nil
+end
+
+--- Seconds since the client started, or nil.
+function Api.now()
+  local t = safe(GetTime)
+  return type(t) == "number" and t or nil
+end
+
 --- The names of where the player is: zone, sub-zone, minimap text.
 function Api.zoneTexts()
   local out = {}
@@ -901,6 +914,13 @@ function Api.availableQuests(mapID)
 end
 
 local watchedByUs
+
+--- The game stops following any quest (as when the player unticks it).
+function Api.clearSuperTrack()
+  if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+    try(C_SuperTrack.SetSuperTrackedQuestID, 0)
+  end
+end
 
 --- Stops highlighting the quest TrailMate focused, and removes it from the
 --- objective tracker only if TrailMate was the one who added it.
@@ -1127,7 +1147,7 @@ Api.PROBES = {
   "issecretvalue", "C_AddOns.GetAddOnMetadata",
   "GetPlayerFacing", "C_Map.GetMapWorldSize", "C_Map.GetWorldPosFromMapPos",
   "C_Map.GetMapPosFromWorldPos", "CreateVector2D", "C_QuestLine.GetAvailableQuestLines",
-  "IsSpellKnown", "IsPlayerSpell", "C_SuperTrack.SetSuperTrackedQuestID",
+  "IsSpellKnown", "IsPlayerSpell", "C_SuperTrack.SetSuperTrackedQuestID", "C_SuperTrack.GetSuperTrackedQuestID",
   "C_QuestLog.AddQuestWatch", "C_QuestLog.SetSelectedQuest", "C_QuestLog.GetLogIndexForQuestID",
 }
 

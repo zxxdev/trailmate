@@ -13,6 +13,8 @@ local atlas -- TrailMateDB.atlas, shared by the account's characters
 local plan, progress, current, statuses
 local arrowStep, markMethod
 local detour -- { target, label }: takes over the arrow for a moment
+local ourFocus -- the quest TrailMate asked the game to follow
+local quietUntil -- until then, a quest the game follows is not the player's mark
 local lastAdvice = {}
 local lastProgress = {}
 local lastCounts = {} -- quests worth doing per zone, from the last route
@@ -130,6 +132,9 @@ local function updateTarget(force)
   ns.ItemButton.set(step and step.type == "complete" and Api.questItem(step.questID) or nil)
   if changed then
     local focused = Api.focusQuest(step and step.questID)
+    -- What the game really follows now (it keeps the last one when this
+    -- step's quest is not in the log yet): that is TrailMate's, not a mark.
+    ourFocus = Api.superTrackedQuest() or (step and step.questID)
     if target then
       markMethod = Api.setArrow(target, step.text, focused)
     else
@@ -179,21 +184,48 @@ end
 -- Plan --------------------------------------------------------------------------
 
 local buildFromQuestLog
+local travelTo -- a trip to another zone (defined with the travel planner)
 local advanceGuide -- a guide is finished: go on to the next one
 
 -- The step window shows the trip while travelling to a chosen zone.
 local function render()
   if detour and detour.zone then
     ns.UI.renderTravel(travelLines, L)
+  elseif detour and detour.marked then
+    local step = plan and current and plan.steps[current]
+    ns.UI.renderMarked(detour, step and step.text, ns.Guide.isGuide(plan), L)
   else
     ns.UI.render(plan, current, statuses, L, markMethod)
   end
 end
 
+-- The quest the player marked: what the arrow says and where it points (the
+-- objectives, then the turn-in once done). False when it has left the log
+-- (handed in or dropped): the detour ends and the guide leads again.
+local function updateMarked()
+  local log = facts().questLog
+  local entry = questInfo(detour.marked)
+  local view = ns.Marked.view(detour.marked, Api.questTitle(detour.marked) or (entry and entry.title), log, L)
+  if not view then
+    detour, arrowStep = nil, false
+    say(L["Your marked quest is no longer in the log: back to the guide."])
+    return false
+  end
+  detour.label, detour.kind = view.text, view.kind
+  detour.target = questTarget(detour.marked, view.kind == "turnin")
+  detour.item = view.kind == "complete" and Api.questItem(detour.marked) or nil
+  return true
+end
+
 local function refresh()
+  if detour and detour.marked then
+    updateMarked()
+  end
   if not plan then
     render()
-    if not detour then
+    if detour then
+      updateTarget()
+    else
       ns.Arrow.setTarget(nil)
     end
     return
@@ -468,7 +500,7 @@ end
 -- when there is none (guides off, or none for this faction), so the plan is
 -- built from the quest log instead.
 local lastGone = {} -- quests the guide left out, by name (for the self-test)
-local function loadGuide(quiet)
+local function loadGuide(quiet, repick)
   if cdb.prefs.guide == false then
     return false
   end
@@ -476,7 +508,26 @@ local function loadGuide(quiet)
   if #list == 0 then
     return false
   end
-  local g = ns.Guide.pick(list, Api.level() or 1, cdb.guideName, guideFinished)
+  -- The zone the player chose, else where the player is: a guide with a
+  -- part there wins. A chosen zone with no guide for it gets a route from
+  -- the quest log instead.
+  local level, focus = Api.level() or 1, cdb.prefs.focusZone
+  if focus and not cdb.guideName and not ns.Guide.forZone(list, level, focus, guideFinished) then
+    return false
+  end
+  -- Rebuilt by itself (login, reload, a new quest): the guide being
+  -- followed stays while it is not finished, so crossing into the next zone
+  -- does not swap guides. Only "automatic" or choosing a zone (repick)
+  -- looks again by zone.
+  local chosen = cdb.guideName
+  if not (chosen or repick or focus) and ns.Guide.isGuide(plan) then
+    for _, g in ipairs(list) do
+      if plan.title == g.name and not guideFinished(g) then
+        chosen = g.name
+      end
+    end
+  end
+  local g = ns.Guide.pick(list, level, chosen, guideFinished, focus or Api.position())
   -- What this character has done decides which quests it can still pick
   -- up: a breadcrumb whose quest it took, or a quest that needs another
   -- one first, is left out.
@@ -537,7 +588,7 @@ local function guideCommand(rest)
     return
   elseif word == "on" or word == "si" or word == "sí" or word == "auto" then
     cdb.prefs.guide, cdb.guideName = nil, nil
-    buildFromQuestLog(false)
+    buildFromQuestLog(false, true)
     return
   elseif word == "next" or word == "siguiente" then
     local nextGuide = ns.Guide.after(list, currentGuide(list))
@@ -662,8 +713,8 @@ local function chatContext()
   return table.concat(lines, "\n")
 end
 
-function buildFromQuestLog(quiet)
-  if loadGuide(quiet) then
+function buildFromQuestLog(quiet, repick)
+  if loadGuide(quiet, repick) then
     return
   end
   local p, report = computeRoute()
@@ -736,11 +787,56 @@ local FIND = {
 }
 
 local function backToPlan()
-  if detour then
-    detour = nil
-    arrowStep = false
-    refresh()
+  if not detour then
+    return
   end
+  local marked = detour.marked
+  if detour.zone then
+    cdb.trip = nil -- the player leaves the trip
+  end
+  detour = nil
+  arrowStep = false
+  if marked then
+    -- The game stops following the marked quest (the guide's own quest is
+    -- followed again just below), so marking it again is a fresh click.
+    Api.clearSuperTrack()
+    -- Marked on the way to another zone: the trip goes on.
+    local trip, here = cdb.trip, Api.position()
+    if trip and here and here ~= trip.zone then
+      travelTo(trip.zone, trip.name or "?")
+      return
+    end
+  end
+  refresh()
+end
+
+-- The player marked a quest (the game follows it now): the arrow goes there
+-- and the window offers the way back to the guide.
+local function followMark()
+  local questID = Api.superTrackedQuest()
+  local step = plan and current and plan.steps[current]
+  if detour and detour.marked and step and questID == step.questID then
+    backToPlan() -- marked the guide's own quest: back to it
+    return
+  end
+  if detour and detour.marked == questID then
+    return
+  end
+  local isMark = ns.Marked.isPlayerMark(questID, {
+    ours = ourFocus, following = step and step.questID, now = Api.now(), quietUntil = quietUntil,
+    questLog = facts().questLog,
+  })
+  if not isMark then
+    return
+  end
+  detour = { marked = questID }
+  if not updateMarked() then
+    return
+  end
+  say(L["Arrow on the quest you marked: %s. The guide waits."]:format(detour.label))
+  arrowStep = false
+  updateTarget()
+  render()
 end
 
 local function findNpc(rest)
@@ -932,7 +1028,7 @@ end
 
 -- Applies a trip: tells the player the steps and points the arrow at the
 -- first place to go, until they arrive.
-local function travelTo(mapID, name)
+function travelTo(mapID, name)
   local _, lines, target, item = planTrip(mapID, name)
   travelLines = lines
   detour = {
@@ -943,6 +1039,9 @@ local function travelTo(mapID, name)
     zone = mapID,
     zoneName = name,
   }
+  -- Saved with the character, so a /reload or a new login on the way
+  -- resumes the trip instead of dropping it.
+  cdb.trip = { zone = mapID, name = name }
   updateTarget(true)
   for _, line in ipairs(lines) do
     say(line)
@@ -954,10 +1053,15 @@ end
 -- The player picks a zone: the route works there, and the travel planner
 -- shows the quickest way to get there.
 local function chooseZone(rest)
+  -- Choosing a zone, or automatic, also lets go of a guide fixed before:
+  -- the guide is picked again for that zone (or where the player is).
   if (rest or ""):lower() == "auto" then
-    cdb.prefs.focusZone = nil
+    cdb.prefs.focusZone, cdb.guideName, cdb.trip = nil, nil, nil
+    if detour and detour.zone then
+      detour, arrowStep = nil, false
+    end
     say(L["Zone choice back to automatic."])
-    buildFromQuestLog(false)
+    buildFromQuestLog(false, true)
     return
   end
   local z = lastZones[tonumber(rest) or 0]
@@ -965,17 +1069,17 @@ local function chooseZone(rest)
     say(L["Type /tm strategy first, then /tm zone <number>."])
     return
   end
-  cdb.prefs.focusZone = z.mapID
+  cdb.prefs.focusZone, cdb.guideName = z.mapID, nil
   local name = Api.mapName(z.mapID) or z.name
   say(L["Next zone: %s."]:format(name))
   if Api.position() == z.mapID then
     -- Already here: start with the place's quests and the hearthstone.
     cdb.arrival, cdb.arrivalDone = z.mapID, {}
-    buildFromQuestLog(false)
+    buildFromQuestLog(false, true)
   elseif (lastCounts[z.mapID] or 0) == 0 then
     say(L["No quests of yours there yet: pick some up when you arrive."])
   else
-    buildFromQuestLog(true)
+    buildFromQuestLog(true, true)
   end
   if Api.position() ~= z.mapID then
     travelTo(z.mapID, name)
@@ -1188,6 +1292,7 @@ local HELP = {
   { "/tm tracking on|off  (rastreos si|no)", "Skip hunter tracking spells" },
   { "/tm reserve | reserva <gold>", "Gold the trainer advice never spends" },
   { "/tm arrow | flecha on|off", "Show or hide the arrow" },
+  { "/tm arrow | flecha top|center  (arriba|centro)", "Bring the arrow back to the top or the middle of the screen" },
   { "/tm trail | rastro on|off|show|export|clear", "Learn the ways you walk and follow them (dots on the map)" },
   { "/tm guide | guia [number|next|auto|off]", "Quest guides: list, choose one, or plan from your quest log" },
   { "/tm dungeon | mazmorra [number]", "Dungeons by level: list, or plan one (quests first, then the entrance)" },
@@ -1196,6 +1301,8 @@ local HELP = {
   { "/tm companion | compañero claude|chatgpt|none", "Icon colour of your AI companion" },
   { "/tm auto on|off", "Rebuild the plan by itself when it ends" },
   { "/tm show | hide  (mostrar | ocultar)", "Show or hide the window" },
+  { "/tm minimap | minimapa", "Show or hide the minimap button" },
+  { "/tm options | opciones", "TrailMate's page in Esc > Options > AddOns" },
   { "/tm clear | borrar", "Remove the plan" },
   { "/tm diag", "What this client exposes (for bug reports)" },
   { "/tm test | selftest", "Run the self-test and write it to the log" },
@@ -1236,7 +1343,14 @@ alias({ "done", "hecho" }, function()
   refresh()
 end)
 alias({ "undo", "deshaz" }, function()
-  say((progress and Plan.undo(progress)) and L["Undone."] or L["Nothing to undo."])
+  local id = progress and Plan.undo(progress)
+  local text
+  for _, step in ipairs(id and plan and plan.steps or {}) do
+    if step.id == id then
+      text = step.text
+    end
+  end
+  say(text and L["Undone: %s"]:format(text) or (id and L["Undone."]) or L["Nothing to undo."])
   refresh()
 end)
 alias({ "trainer", "instructor" }, adviseTrainer)
@@ -1379,8 +1493,18 @@ alias({ "trail", "rastro" }, function(rest)
   say(L["Trails: %s, %d dots and %d joins learned."]:format(cdb.prefs.trails == false and L["off"] or L["on"],
     nodes, links))
 end)
+local ARROW_PLACES = { top = "top", arriba = "top", center = "center", centre = "center", centro = "center" }
+
 alias({ "arrow", "flecha" }, function(rest)
-  cdb.arrow.disabled = not yes(rest)
+  local where = ARROW_PLACES[(rest or ""):lower()]
+  if where then
+    -- Bring it back where it can be seen (and turn it on).
+    cdb.arrow.disabled = false
+    ns.Arrow.place(where)
+    say(where == "top" and L["Arrow moved to the top of the screen."] or L["Arrow moved to the middle of the screen."])
+  else
+    cdb.arrow.disabled = not yes(rest)
+  end
   ns.Arrow.update()
 end)
 alias({ "auto" }, function(rest)
@@ -1416,6 +1540,21 @@ end)
 alias({ "panel" }, function()
   ns.Panel.toggle()
 end)
+alias({ "options", "opciones" }, function()
+  if not ns.Options.open() then
+    say(L["Find TrailMate in Esc > Options > AddOns."])
+  end
+end)
+
+-- The minimap button: shown or hidden, remembered per character.
+local function toggleMinimapButton()
+  local b = ns.MinimapButton.button
+  cdb.minimap.hidden = not cdb.minimap.hidden
+  if b then
+    b:SetShown(not cdb.minimap.hidden)
+  end
+end
+alias({ "minimap", "minimapa" }, toggleMinimapButton)
 
 SLASH_TRAILMATE1 = "/tm"
 SLASH_TRAILMATE2 = "/trailmate"
@@ -1736,6 +1875,15 @@ end
 local frame = CreateFrame("Frame")
 local handlers = {}
 
+-- Right after a quest is taken, handed in or dropped (and at login), the game
+-- may choose a quest to follow by itself: that is not a mark of the player's.
+local function quiet(seconds)
+  local now = Api.now()
+  if now then
+    quietUntil = math.max(quietUntil or 0, now + seconds)
+  end
+end
+
 handlers.ADDON_LOADED = function(name)
   if name ~= addonName then
     -- The game's talent window loads on demand: dock the talent plan to it.
@@ -1780,6 +1928,21 @@ handlers.ADDON_LOADED = function(name)
   guard("minimap button", ns.MinimapButton.create, cdb.minimap, L, ns.Panel.toggle, function()
     ns.UI.setShown(cdb.ui.hidden == true)
   end)
+  guard("options page", ns.Options.create, L, {
+    panel = ns.Panel.toggle,
+    steps = function()
+      ns.UI.setShown(cdb.ui.hidden == true)
+    end,
+    minimap = toggleMinimapButton,
+    arrowTop = function()
+      COMMANDS.arrow("top")
+    end,
+    arrowCenter = function()
+      COMMANDS.arrow("center")
+    end,
+    help = COMMANDS.help,
+    version = version,
+  })
   guard("icon", ns.Theme.setCompanion, cdb.prefs.companion)
   guard("talent plan", ns.TalentPanel.init, cdb.talents, L)
   guard("talent plan", ns.TalentPanel.attach)
@@ -1797,6 +1960,7 @@ local rebuildPending = false
 
 handlers.PLAYER_ENTERING_WORLD = function(isLogin, isReload)
   if cdb then
+    quiet(ns.Marked.QUIET_LOGIN)
     arrowStep = false
     updateAlerts()
     -- A guide is reloaded too (the guide data may be newer), and with no
@@ -1805,6 +1969,21 @@ handlers.PLAYER_ENTERING_WORLD = function(isLogin, isReload)
     if (isLogin or isReload or isLogin == nil) and (guided or (plan and Builder.isAuto(plan)))
       and cdb.prefs.autoPlan ~= false then
       rebuildPending = true
+    end
+    -- A trip to another zone saved before the /reload or the logout: go on
+    -- with it from here, unless the player already got there.
+    if cdb.trip and not detour then
+      after(2, function()
+        local trip, here = cdb.trip, Api.position()
+        if not trip or detour or not here then
+          return
+        end
+        if here == trip.zone then
+          cdb.trip = nil
+        else
+          guard("trip", travelTo, trip.zone, trip.name or "?")
+        end
+      end)
     end
     questThrottle:mark()
   end
@@ -1824,7 +2003,20 @@ handlers.QUEST_LOG_UPDATE = function()
   end
   questChanged()
 end
-handlers.QUEST_REMOVED = questChanged
+
+handlers.QUEST_REMOVED = function()
+  quiet(ns.Marked.QUIET)
+  questChanged()
+end
+
+handlers.SUPER_TRACKING_CHANGED = function()
+  if cdb then
+    -- Read a moment later: TrailMate's own choice may still be on its way.
+    after(0.2, function()
+      guard("marked quest", followMark)
+    end)
+  end
+end
 
 handlers.ZONE_CHANGED_NEW_AREA = function()
   -- Left the zone just arrived in: the arrival guide is over.
@@ -1860,6 +2052,7 @@ end
 
 handlers.QUEST_ACCEPTED = function(a, b)
   local questID = b or a
+  quiet(ns.Marked.QUIET)
   -- Learn who gave it and where.
   local q = questInfo(questID)
   local npc = Api.npc()
@@ -1879,6 +2072,7 @@ handlers.QUEST_ACCEPTED = function(a, b)
 end
 
 handlers.QUEST_TURNED_IN = function(questID)
+  quiet(ns.Marked.QUIET)
   local npc = Api.npc()
   Atlas.recordFinish(atlas, questID, { npcID = npc and npc.id }, playerPoint())
   if npc then
@@ -2133,7 +2327,7 @@ frame:SetScript("OnUpdate", function(_, elapsed)
     -- Arrived in the zone the player chose: drop the detour and route it.
     if detour and detour.zone and Api.position() == detour.zone then
       cdb.arrival, cdb.arrivalDone = detour.zone, {}
-      detour, arrowStep = nil, false
+      detour, arrowStep, cdb.trip = nil, false, nil
       buildFromQuestLog(false)
     end
     if detour or (plan and current) then

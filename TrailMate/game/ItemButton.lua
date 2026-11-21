@@ -60,7 +60,7 @@ local function make(name, parent)
   return b
 end
 
---- Makes the two buttons: left of the step window, left of the arrow.
+--- Makes the two buttons: left of the step window, and centred under the arrow.
 function ItemButton.create(window, arrow)
   local watcher = CreateFrame("Frame")
   watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -76,10 +76,12 @@ function ItemButton.create(window, arrow)
     b:SetPoint("TOPRIGHT", window, "TOPLEFT", -4, -34)
   end
   if arrow then
-    -- A protected button may only be anchored to frames, not to textures:
-    -- left of the arrow picture, measured from the top of the arrow frame.
+    -- Centred under the arrow's text, where the eye already is. A protected
+    -- button may only be anchored to frames (not to the text) and cannot
+    -- move in combat, so it hangs from the bottom of the arrow frame, which
+    -- leaves room for two lines of text and never covers the arrow.
     local b = make("TrailMateArrowItemButton", arrow)
-    b:SetPoint("TOPRIGHT", arrow, "TOP", -34, -15)
+    b:SetPoint("TOP", arrow, "BOTTOM", 0, -4)
   end
 end
 

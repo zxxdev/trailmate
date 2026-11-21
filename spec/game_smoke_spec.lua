@@ -261,6 +261,86 @@ describe("addon smoke test", function()
     assert.is_nil(watched[10])
   end)
 
+  it("follows a quest the player marks, with a button back to the route (the user's case)", function()
+    _G.C_SuperTrack.GetSuperTrackedQuestID = function() return superTracked end
+    _G.SlashCmdList.TRAILMATE("diario")
+    local window = named.TrailMateFrame
+    assert.equals("Hacer: Lobos", window.step.shown_text)
+    -- Jabalies shows on the map once the route is made (it stays out of it).
+    _G.C_QuestLog.GetQuestsOnMap = function()
+      return { { questID = 10, x = 0.3, y = 0.3 }, { questID = 11, x = 0.6, y = 0.6 } }
+    end
+    -- TrailMate's own choice (Lobos) is not the player's mark.
+    fire("SUPER_TRACKING_CHANGED")
+    assert.equals("Hacer: Lobos", window.step.shown_text)
+    assert.is_false(window.back.visible)
+    -- The player clicks Jabalies (done, in this fake): the arrow goes to hand it in.
+    superTracked = 11
+    fire("SUPER_TRACKING_CHANGED")
+    eventFrame().scripts.OnUpdate(eventFrame(), 0.1)
+    assert.equals("Tu misión marcada", window.title.shown_text)
+    assert.equals("Entregar: Jabalies", window.step.shown_text)
+    assert.equals("Siguiente en la guía - Hacer: Lobos", window.why.shown_text)
+    assert.equals("Ruta en pausa", window.counter.shown_text)
+    assert.equals("Entregar: Jabalies", named.TrailMateArrow.label.shown_text)
+    assert.is_true(window.back.visible)
+    assert.equals("Volver a la ruta", window.back.shown_text)
+    assert.matches("Flecha a la misión que has marcado: Entregar: Jabalies", output())
+    -- The button goes back: the guide's quest is followed again.
+    window.back.scripts.OnClick(window.back)
+    assert.equals("Hacer: Lobos", window.step.shown_text)
+    assert.equals(10, superTracked)
+    assert.is_false(window.back.visible)
+  end)
+
+  it("goes back to the route by itself when the marked quest leaves the log", function()
+    _G.C_SuperTrack.GetSuperTrackedQuestID = function() return superTracked end
+    _G.SlashCmdList.TRAILMATE("diario")
+    superTracked = 11
+    fire("SUPER_TRACKING_CHANGED")
+    local window = named.TrailMateFrame
+    assert.is_true(window.back.visible)
+    local jabalies = table.remove(quests, 2)
+    finally(function()
+      quests[2] = jabalies
+    end)
+    fire("QUEST_REMOVED", 11)
+    tick()
+    assert.equals("Hacer: Lobos", window.step.shown_text)
+    assert.is_false(window.back.visible)
+    assert.matches("ya no está en el diario", output())
+  end)
+
+  it("has its page in Esc > Options > AddOns, and hides the minimap button when asked", function()
+    install()
+    rawset(_G, "TrailMateDB", nil)
+    rawset(_G, "TrailMateCharDB", nil)
+    local seen = {}
+    rawset(_G, "Settings", {
+      RegisterCanvasLayoutCategory = function(frame, name)
+        seen.frame, seen.name = frame, name
+        return { GetID = function() return 7 end }
+      end,
+      RegisterAddOnCategory = function(category) seen.category = category end,
+      OpenToCategory = function(id) seen.opened = id end,
+    })
+    rawset(_G, "Minimap", fakeObject("Minimap"))
+    finally(function()
+      rawset(_G, "Settings", nil)
+      rawset(_G, "Minimap", nil)
+    end)
+    loadAddon()
+    fire("ADDON_LOADED", "TrailMate")
+    assert.equals("TrailMate", seen.name)
+    assert.is_table(seen.category)
+    _G.SlashCmdList.TRAILMATE("opciones")
+    assert.equals(7, seen.opened)
+    _G.SlashCmdList.TRAILMATE("minimapa")
+    assert.is_true(_G.TrailMateCharDB.minimap.hidden)
+    _G.SlashCmdList.TRAILMATE("minimapa")
+    assert.is_false(_G.TrailMateCharDB.minimap.hidden)
+  end)
+
   it("rebuilds an automatic plan on login and explains the route", function()
     _G.SlashCmdList.TRAILMATE("diario")
     local saved = _G.TrailMateCharDB
@@ -327,6 +407,14 @@ describe("addon smoke test", function()
     assert.equals("Hacer: Lobos", arrow.label.shown_text)
     _G.SlashCmdList.TRAILMATE("flecha no")
     assert.is_false(arrow.visible)
+    -- Lost off screen? Back to the middle (and on again), remembered.
+    _G.SlashCmdList.TRAILMATE("flecha centro")
+    assert.same({ "CENTER", "CENTER", 0, 60 }, { _G.TrailMateCharDB.arrow.point, _G.TrailMateCharDB.arrow.relPoint,
+      _G.TrailMateCharDB.arrow.x, _G.TrailMateCharDB.arrow.y })
+    assert.is_false(_G.TrailMateCharDB.arrow.disabled)
+    assert.matches("Flecha colocada en el centro de la pantalla", output())
+    _G.SlashCmdList.TRAILMATE("flecha arriba")
+    assert.equals("TOP", _G.TrailMateCharDB.arrow.point)
   end)
 
   it("adds quest givers shown on the map and rebuilds when a new quest is accepted", function()
@@ -448,8 +536,30 @@ describe("addon smoke test", function()
     assert.equals("Ve al maestro de vuelo: Hammerfall.", window.step.shown_text)
     assert.matches("Vuela de Hammerfall a Grom'gol%.$", output():match("[^\n]*Vuela[^\n]*"))
     assert.is_nil(output():find("Abre una vez un maestro de vuelo allí", 1, true))
+    -- A /reload on the way: the trip goes on (it used to be dropped, and the
+    -- guide's step came back as if the trip had been skipped: the user's case).
+    local saved = _G.TrailMateCharDB
+    assert.equals(1434, saved.trip.zone)
+    frames, named = {}, {}
+    rawset(_G, "TrailMateCharDB", saved)
+    loadAddon()
+    fire("ADDON_LOADED", "TrailMate")
+    fire("PLAYER_ENTERING_WORLD", false, true)
+    window = named.TrailMateFrame
+    assert.equals("Viaje", window.counter.shown_text)
+    -- A quest marked on the way: back from it, the trip goes on (the review's case).
+    _G.C_SuperTrack.GetSuperTrackedQuestID = function() return superTracked end
+    superTracked = 11
+    fire("SUPER_TRACKING_CHANGED")
+    assert.equals("Tu misión marcada", window.title.shown_text)
+    window.back.scripts.OnClick(window.back)
+    assert.equals("Viaje", window.counter.shown_text)
+    assert.equals(1434, _G.TrailMateCharDB.trip.zone)
+    assert.equals(0, superTracked) -- the game no longer follows the marked quest
+    -- Going back to the plan leaves the trip for good.
     _G.SlashCmdList.TRAILMATE("plan")
     assert.equals("Hacer: Lobos", window.step.shown_text)
+    assert.is_nil(_G.TrailMateCharDB.trip)
     rawset(_G, "C_TaxiMap", nil)
     rawset(_G, "CreateVector2D", nil)
   end)
